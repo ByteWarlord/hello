@@ -1,5 +1,6 @@
 #!/bin/bash
 if [[ $EUID -ne 0 ]]; then
+    clear
     echo "错误：本脚本需要 root 权限执行。" 1>&2
     exit 1
 fi
@@ -36,7 +37,7 @@ welcome() {
     echo "一键脚本出现任何问题请转手动搭建！ xtaolabs.com"
     echo ""
     echo ""
-    echo "欢迎使用 pagermaid2-Pyro 一键安装程序。"
+    echo "欢迎使用 PagerMaid-Modify 一键安装程序。"
     echo "安装即将开始"
     echo "如果您想取消安装，"
     echo "请在 5 秒钟内按 Ctrl+C 终止此脚本。"
@@ -251,10 +252,10 @@ debian_require_install() {
 
 download_repo() {
     echo "下载 repository 中 . . ."
-    rm -rf /var/lib/pagermaid22 >>/dev/null 2>&1
-    git clone https://github.com/TeamPGM/pagermaid2-Pyro.git /var/lib/pagermaid22 >>/dev/null 2>&1
-    cd /var/lib/pagermaid22 >>/dev/null 2>&1
-    echo "Hello World!" >/var/lib/pagermaid22/public.lock
+    rm -rf /var/lib/pagermaid2 >>/dev/null 2>&1
+    git clone https://gitlab.com/Xtao-Labs/pagermaid-modify.git /var/lib/pagermaid2 >>/dev/null 2>&1
+    cd /var/lib/pagermaid2 >>/dev/null 2>&1
+    echo "Hello World!" >/var/lib/pagermaid2/public.lock
 }
 
 pypi_install() {
@@ -268,10 +269,11 @@ configure() {
     config_file=config.yml
     echo "生成配置文件中 . . ."
     cp config.gen.yml config.yml
-    printf "请输入应用程序 api_id（不懂请直接回车）："
+    echo "api_id、api_hash 申请地址： https://my.telegram.org/"
+    printf "请输入应用程序 api_id："
     read -r api_id <&1
     sed -i "s/ID_HERE/$api_id/" $config_file
-    printf "请输入应用程序 api_hash（不懂请直接回车）："
+    printf "请输入应用程序 api_hash："
     read -r api_hash <&1
     sed -i "s/HASH_HERE/$api_hash/" $config_file
     printf "请输入应用程序语言（默认：zh-cn）："
@@ -299,10 +301,10 @@ configure() {
     read -r logging_confirmation <&1
     case $logging_confirmation in
     [yY][eE][sS] | [yY])
-        printf "请输入您的日志记录群组/频道的 ChatID （如果要发送给 原 pagermaid2 作者 ，请按Enter）："
+        printf "请输入您的日志记录群组/频道的 ChatID （如果要发送给 原 PagerMaid 作者 ，请按Enter）："
         read -r log_chatid <&1
         if [ -z "$log_chatid" ]; then
-            echo "LOG 将发送到 原 pagermaid2 作者."
+            echo "LOG 将发送到 原 PagerMaid 作者."
         else
             sed -i "s/503691334/$log_chatid/" $config_file
         fi
@@ -348,12 +350,12 @@ login_screen() {
     screen -S userbot -X quit >>/dev/null 2>&1
     screen -dmS userbot
     sleep 1
-    screen -x -S userbot -p 0 -X stuff "cd /var/lib/pagermaid22 && $PYV -m pagermaid22"
+    screen -x -S userbot -p 0 -X stuff "cd /var/lib/pagermaid2 && $PYV -m pagermaid2"
     screen -x -S userbot -p 0 -X stuff $'\n'
     sleep 3
     if [ "$(ps -def | grep [p]agermaid | grep -v grep)" == "" ]; then
-        echo "pagermaid2 运行时发生错误，错误信息："
-        cd /var/lib/pagermaid22 && $PYV -m pagermaid22 >err.log
+        echo "PagerMaid 运行时发生错误，错误信息："
+        cd /var/lib/pagermaid2 && $PYV -m pagermaid2 >err.log
         cat err.log
         screen -S userbot -X quit >>/dev/null 2>&1
         exit 1
@@ -371,21 +373,19 @@ login_screen() {
 
         screen -x -S userbot -p 0 -X stuff "$phonenum"
         screen -x -S userbot -p 0 -X stuff $'\n'
-        screen -x -S userbot -p 0 -X stuff "y"
-        screen -x -S userbot -p 0 -X stuff $'\n'
 
         sleep 2
         
         if [ "$(ps -def | grep [p]agermaid | grep -v grep)" == "" ]; then
             echo "手机号输入错误！请确认您是否带了区号（中国号码为 +86 如 +8618888888888）"
-            screen -x -S userbot -p 0 -X stuff "cd /var/lib/pagermaid22 && $PYV -m pagermaid22"
+            screen -x -S userbot -p 0 -X stuff "cd /var/lib/pagermaid2 && $PYV -m pagermaid2"
             screen -x -S userbot -p 0 -X stuff $'\n'
             continue
         fi
 
         sleep 1
         if [ "$(ps -def | grep [p]agermaid | grep -v grep)" == "" ]; then
-            echo "pagermaid2 运行时发生错误，可能是因为发送验证码失败，请检查您的 API_ID 和 API_HASH"
+            echo "PagerMaid 运行时发生错误，可能是因为发送验证码失败，请检查您的 API_ID 和 API_HASH"
             exit 1
         fi
 
@@ -422,17 +422,17 @@ login_screen() {
 systemctl_reload() {
     echo "正在写入系统进程守护 . . ."
     echo "[Unit]
-    Description=pagermaid2-Pyro telegram utility daemon
+    Description=PagerMaid-Modify telegram utility daemon
     After=network.target
     [Install]
     WantedBy=multi-user.target
     [Service]
     Type=simple
-    WorkingDirectory=/var/lib/pagermaid22
-    ExecStart=$PYV -m pagermaid22
+    WorkingDirectory=/var/lib/pagermaid2
+    ExecStart=$PYV -m pagermaid2
     Restart=always
-    " >/etc/systemd/system/pagermaid22.service
-    chmod 755 pagermaid22.service >>/dev/null 2>&1
+    " >/etc/systemd/system/pagermaid2.service
+    chmod 755 pagermaid2.service >>/dev/null 2>&1
     systemctl daemon-reload >>/dev/null 2>&1
     systemctl start pagermaid2 >>/dev/null 2>&1
     systemctl enable pagermaid2 >>/dev/null 2>&1
@@ -452,7 +452,7 @@ start_installation() {
         configure
         login_screen
         systemctl_reload
-        echo "pagermaid2 已经安装完毕 在telegram对话框中输入 ,help 并发送查看帮助列表"
+        echo "PagerMaid 已经安装完毕 在telegram对话框中输入 -help 并发送查看帮助列表"
     elif [ "$release" = "ubuntu" ]; then
         echo "系统检测通过。"
         welcome
@@ -466,7 +466,7 @@ start_installation() {
         configure
         login_screen
         systemctl_reload
-        echo "pagermaid2 已经安装完毕 在telegram对话框中输入 ,help 并发送查看帮助列表"
+        echo "PagerMaid 已经安装完毕 在telegram对话框中输入 -help 并发送查看帮助列表"
     elif [ "$release" = "debian" ]; then
         echo "系统检测通过。"
         welcome
@@ -480,7 +480,7 @@ start_installation() {
         configure
         login_screen
         systemctl_reload
-        echo "pagermaid2 已经安装完毕 在telegram对话框中输入 ,help 并发送查看帮助列表"
+        echo "PagerMaid 已经安装完毕 在telegram对话框中输入 -help 并发送查看帮助列表"
     else
         echo "目前暂时不支持此系统。"
     fi
@@ -488,15 +488,15 @@ start_installation() {
 }
 
 cleanup() {
-    if [ ! -x "/var/lib/pagermaid22" ]; then
+    if [ ! -x "/var/lib/pagermaid2" ]; then
         echo "目录不存在不需要卸载。"
     else
-        echo "正在关闭 pagermaid2 . . ."
+        echo "正在关闭 PagerMaid . . ."
         systemctl disable pagermaid2 >>/dev/null 2>&1
-        systemctl stop pagermaid2 >>/dev/null 2>&1
-        echo "正在删除 pagermaid2 文件 . . ."
+        systemctl stop pagermaid >>/dev/null 2>&1
+        echo "正在删除 PagerMaid 文件 . . ."
         rm -rf /etc/systemd/system/pagermaid2.service >>/dev/null 2>&1
-        rm -rf /var/lib/pagermaid22 >>/dev/null 2>&1
+        rm -rf /var/lib/pagermaid2 >>/dev/null 2>&1
         echo "卸载完成 . . ."
     fi
 }
@@ -507,14 +507,14 @@ reinstall() {
 }
 
 cleansession() {
-    if [ ! -x "/var/lib/pagermaid22" ]; then
-        echo "目录不存在请重新安装 pagermaid2。"
+    if [ ! -x "/var/lib/pagermaid2" ]; then
+        echo "目录不存在请重新安装 PagerMaid。"
         exit 1
     fi
-    echo "正在关闭 pagermaid2 . . ."
+    echo "正在关闭 PagerMaid . . ."
     systemctl stop pagermaid2 >>/dev/null 2>&1
     echo "正在删除账户授权文件 . . ."
-    rm -rf /var/lib/pagermaid22/pagermaid2.session >>/dev/null 2>&1
+    rm -rf /var/lib/pagermaid2/pagermaid2.session >>/dev/null 2>&1
     echo "请进行重新登陆. . ."
     if [ "$release" = "centos" ]; then
         yum_python_check
@@ -534,7 +534,7 @@ cleansession() {
 
 stop_pager() {
     echo ""
-    echo "正在关闭 pagermaid2 . . ."
+    echo "正在关闭 PagerMaid . . ."
     systemctl stop pagermaid2 >>/dev/null 2>&1
     echo ""
     sleep 3
@@ -543,7 +543,7 @@ stop_pager() {
 
 start_pager() {
     echo ""
-    echo "正在启动 pagermaid2 . . ."
+    echo "正在启动 PagerMaid . . ."
     systemctl start pagermaid2 >>/dev/null 2>&1
     echo ""
     sleep 3
@@ -552,7 +552,7 @@ start_pager() {
 
 restart_pager() {
     echo ""
-    echo "正在重新启动 pagermaid2 . . ."
+    echo "正在重新启动 PagerMaid . . ."
     systemctl restart pagermaid2 >>/dev/null 2>&1
     echo ""
     sleep 3
@@ -604,17 +604,17 @@ shon_online() {
     echo ""
     echo ""
     echo "请选择您需要进行的操作:"
-    echo "  1) 安装 pagermaid2"
-    echo "  2) 卸载 pagermaid2"
-    echo "  3) 重新安装 pagermaid2"
-    echo "  4) 重新登陆 pagermaid2"
-    echo "  5) 关闭 pagermaid2"
-    echo "  6) 启动 pagermaid2"
-    echo "  7) 重新启动 pagermaid2"
-    echo "  8) 重新安装 pagermaid2 依赖"
+    echo "  1) 安装 PagerMaid"
+    echo "  2) 卸载 PagerMaid"
+    echo "  3) 重新安装 PagerMaid"
+    echo "  4) 重新登陆 PagerMaid"
+    echo "  5) 关闭 PagerMaid"
+    echo "  6) 启动 PagerMaid"
+    echo "  7) 重新启动 PagerMaid"
+    echo "  8) 重新安装 PagerMaid 依赖"
     echo "  9) 退出脚本"
     echo ""
-    echo "     Version：1.0.1"
+    echo "     Version：0.1.4"
     echo ""
     echo -n "请输入编号: "
     read N
