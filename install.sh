@@ -1,636 +1,175 @@
 #!/bin/bash
-if [[ $EUID -ne 0 ]]; then
-    clear
-    echo "错误：本脚本需要 root 权限执行。" 1>&2
-    exit 1
+
+red='\033[0;31m'
+green='\033[0;32m'
+yellow='\033[0;33m'
+plain='\033[0m'
+
+cur_dir=$(pwd)
+
+# check root
+[[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain} 必须使用root用户运行此脚本！\n" && exit 1
+
+# check os
+if [[ -f /etc/redhat-release ]]; then
+    release="centos"
+elif cat /etc/issue | grep -Eqi "debian"; then
+    release="debian"
+elif cat /etc/issue | grep -Eqi "ubuntu"; then
+    release="ubuntu"
+elif cat /etc/issue | grep -Eqi "centos|red hat|redhat"; then
+    release="centos"
+elif cat /proc/version | grep -Eqi "debian"; then
+    release="debian"
+elif cat /proc/version | grep -Eqi "ubuntu"; then
+    release="ubuntu"
+elif cat /proc/version | grep -Eqi "centos|red hat|redhat"; then
+    release="centos"
+else
+    echo -e "${red}未检测到系统版本，请联系脚本作者！${plain}\n" && exit 1
 fi
 
-a=$(curl --noproxy '*' -sSL https://api.myip.com/)
-b="China"
-if [[ $a == *$b* ]]
-then
-  echo "错误：本脚本不支持境内服务器使用。" 1>&2
-	exit 1
+arch=$(arch)
+
+if [[ $arch == "x86_64" || $arch == "x64" || $arch == "amd64" ]]; then
+    arch="amd64"
+elif [[ $arch == "aarch64" || $arch == "arm64" ]]; then
+    arch="arm64"
+elif [[ $arch == "s390x" ]]; then
+    arch="s390x"
+else
+    arch="amd64"
+    echo -e "${red}检测架构失败，使用默认架构: ${arch}${plain}"
 fi
 
-check_sys() {
-    if [[ -f /etc/redhat-release ]]; then
-        release="centos"
-    elif cat /etc/issue | grep -q -E -i "debian"; then
-        release="debian"
-    elif cat /etc/issue | grep -q -E -i "ubuntu"; then
-        release="ubuntu"
-    elif cat /etc/issue | grep -q -E -i "centos|red hat|redhat"; then
-        release="centos"
-    elif cat /proc/version | grep -q -E -i "debian"; then
-        release="debian"
-    elif cat /proc/version | grep -q -E -i "ubuntu"; then
-        release="ubuntu"
-    elif cat /proc/version | grep -q -E -i "centos|red hat|redhat"; then
-        release="centos"
+echo "架构: ${arch}"
+
+if [ $(getconf WORD_BIT) != '32' ] && [ $(getconf LONG_BIT) != '64' ]; then
+    echo "本软件不支持 32 位系统(x86)，请使用 64 位系统(x86_64)，如果检测有误，请联系作者"
+    exit -1
+fi
+
+os_version=""
+
+# os version
+if [[ -f /etc/os-release ]]; then
+    os_version=$(awk -F'[= ."]' '/VERSION_ID/{print $3}' /etc/os-release)
+fi
+if [[ -z "$os_version" && -f /etc/lsb-release ]]; then
+    os_version=$(awk -F'[= ."]+' '/DISTRIB_RELEASE/{print $2}' /etc/lsb-release)
+fi
+
+if [[ x"${release}" == x"centos" ]]; then
+    if [[ ${os_version} -le 6 ]]; then
+        echo -e "${red}请使用 CentOS 7 或更高版本的系统！${plain}\n" && exit 1
     fi
-}
+elif [[ x"${release}" == x"ubuntu" ]]; then
+    if [[ ${os_version} -lt 16 ]]; then
+        echo -e "${red}请使用 Ubuntu 16 或更高版本的系统！${plain}\n" && exit 1
+    fi
+elif [[ x"${release}" == x"debian" ]]; then
+    if [[ ${os_version} -lt 8 ]]; then
+        echo -e "${red}请使用 Debian 8 或更高版本的系统！${plain}\n" && exit 1
+    fi
+fi
 
-welcome() {
-    echo "一键脚本出现任何问题请转手动搭建！ xtaolabs.com"
-    echo "一键脚本出现任何问题请转手动搭建！ xtaolabs.com"
-    echo "一键脚本出现任何问题请转手动搭建！ xtaolabs.com"
-    echo ""
-    echo ""
-    echo "欢迎使用 PagerMaid-Modify 一键安装程序。"
-    echo "安装即将开始"
-    echo "如果您想取消安装，"
-    echo "请在 5 秒钟内按 Ctrl+C 终止此脚本。"
-    echo ""
-    sleep 5
-}
-
-yum_update() {
-    echo "正在优化 yum . . ."
-    yum install yum-utils epel-release -y >>/dev/null 2>&1
-}
-
-yum_git_check() {
-    echo "正在检查 Git 安装情况 . . ."
-    if command -v git >>/dev/null 2>&1; then
-        echo "Git 似乎存在，安装过程继续 . . ."
+install_base() {
+    if [[ x"${release}" == x"centos" ]]; then
+        yum install wget curl tar -y
     else
-        echo "Git 未安装在此系统上，正在进行安装"
-        yum install git -y >>/dev/null 2>&1
+        apt install wget curl tar -y
     fi
 }
 
-yum_python_check() {
-    echo "正在检查 python 安装情况 . . ."
-    if command -v python3 >>/dev/null 2>&1; then
-        U_V1=$(python3 -V 2>&1 | awk '{print $2}' | awk -F '.' '{print $1}')
-        U_V2=$(python3 -V 2>&1 | awk '{print $2}' | awk -F '.' '{print $2}')
-        if [ $U_V1 -gt 3 ]; then
-            echo 'Python 3.6+ 存在 . . .'
-        elif [ $U_V2 -ge 6 ]; then
-            echo 'Python 3.6+ 存在 . . .'
-            PYV=$U_V1.$U_V2
-            PYV=$(which python$PYV)
-        else
-            if command -v python3.6 >>/dev/null 2>&1; then
-                echo 'Python 3.6+ 存在 . . .'
-                PYV=$(which python3.6)
-            else
-                echo "Python3.6 未安装在此系统上，正在进行安装"
-                yum install python3 -y >>/dev/null 2>&1
-                update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.6 1 >>/dev/null 2>&1
-                PYV=$(which python3.6)
-            fi
-        fi
+#This function will be called when user installed x-ui out of sercurity
+config_after_install() {
+    echo -e "${yellow}出于安全考虑，安装/更新完成后需要强制修改端口与账户密码${plain}"
+    read -p "确认是否继续?[y/n]": config_confirm
+    if [[ x"${config_confirm}" == x"y" || x"${config_confirm}" == x"Y" ]]; then
+        read -p "请设置您的账户名:" config_account
+        echo -e "${yellow}您的账户名将设定为:${config_account}${plain}"
+        read -p "请设置您的账户密码:" config_password
+        echo -e "${yellow}您的账户密码将设定为:${config_password}${plain}"
+        read -p "请设置面板访问端口:" config_port
+        echo -e "${yellow}您的面板访问端口将设定为:${config_port}${plain}"
+        echo -e "${yellow}确认设定,设定中${plain}"
+        /usr/local/x-ui/x-ui setting -username ${config_account} -password ${config_password}
+        echo -e "${yellow}账户密码设定完成${plain}"
+        /usr/local/x-ui/x-ui setting -port ${config_port}
+        echo -e "${yellow}面板端口设定完成${plain}"
     else
-        echo "Python3.6 未安装在此系统上，正在进行安装"
-        yum install python3 -y >>/dev/null 2>&1
-        update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.6 1 >>/dev/null 2>&1
-        PYV=$(which python3.6)
-    fi
-    if command -v pip3 >>/dev/null 2>&1; then
-        echo 'pip 存在 . . .'
-    else
-        echo "pip3 未安装在此系统上，正在进行安装"
-        yum install -y python3-pip >>/dev/null 2>&1
+        echo -e "${red}已取消,所有设置项均为默认设置,请及时修改${plain}"
     fi
 }
 
-yum_screen_check() {
-    echo "正在检查 Screen 安装情况 . . ."
-    if command -v screen >>/dev/null 2>&1; then
-        echo "Screen 似乎存在, 安装过程继续 . . ."
-    else
-        echo "Screen 未安装在此系统上，正在进行安装"
-        yum install screen -y >>/dev/null 2>&1
-    fi
-}
+install_x-ui() {
+    systemctl stop x-ui
+    cd /usr/local/
 
-yum_require_install() {
-    echo "正在安装系统所需依赖，可能需要几分钟的时间 . . ."
-    yum install python-devel python3-devel zbar zbar-devel ImageMagick wget -y >>/dev/null 2>&1
-    wget -T 2 -O /etc/yum.repos.d/konimex-neofetch-epel-7.repo https://copr.fedorainfracloud.org/coprs/konimex/neofetch/repo/epel-7/konimex-neofetch-epel-7.repo >>/dev/null 2>&1
-    yum groupinstall "Development Tools" -y >>/dev/null 2>&1
-    yum-config-manager --add-repo https://download.opensuse.org/repositories/home:/Alexander_Pozdnyakov/CentOS_7/ >>/dev/null 2>&1
-    sudo rpm --import https://build.opensuse.org/projects/home:Alexander_Pozdnyakov/public_key >>/dev/null 2>&1
-    yum list updates >>/dev/null 2>&1
-    yum install neofetch figlet tesseract tesseract-langpack-chi-sim tesseract-langpack-eng -y >>/dev/null 2>&1
-}
-
-apt_update() {
-    echo "正在优化 apt-get . . ."
-    apt-get install sudo -y >>/dev/null 2>&1
-    apt-get update >>/dev/null 2>&1
-}
-
-apt_git_check() {
-    echo "正在检查 Git 安装情况 . . ."
-    if command -v git >>/dev/null 2>&1; then
-        echo "Git 似乎存在, 安装过程继续 . . ."
-    else
-        echo "Git 未安装在此系统上，正在进行安装"
-        apt-get install git -y >>/dev/null 2>&1
-    fi
-}
-
-apt_python_check() {
-    echo "正在检查 python 安装情况 . . ."
-    if command -v python3 >>/dev/null 2>&1; then
-        U_V1=$(python3 -V 2>&1 | awk '{print $2}' | awk -F '.' '{print $1}')
-        U_V2=$(python3 -V 2>&1 | awk '{print $2}' | awk -F '.' '{print $2}')
-        if [ $U_V1 -gt 3 ]; then
-            echo 'Python 3.6+ 存在 . . .'
-        elif [ $U_V2 -ge 6 ]; then
-            echo 'Python 3.6+ 存在 . . .'
-            PYV=$U_V1.$U_V2
-            PYV=$(which python$PYV)
-        else
-            if command -v python3.6 >>/dev/null 2>&1; then
-                echo 'Python 3.6+ 存在 . . .'
-                PYV=$(which python3.6)
-            else
-                echo "Python3.6 未安装在此系统上，正在进行安装"
-                add-apt-repository ppa:deadsnakes/ppa -y
-                apt-get update >>/dev/null 2>&1
-                apt-get install python3.6 -y >>/dev/null 2>&1
-                update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.6 1 >>/dev/null 2>&1
-                PYV=$(which python3.6)
-            fi
-        fi
-    else
-        echo "Python3.6 未安装在此系统上，正在进行安装"
-        add-apt-repository ppa:deadsnakes/ppa -y
-        apt-get update >>/dev/null 2>&1
-        apt-get install python3.6 -y >>/dev/null 2>&1
-        update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.6 1 >>/dev/null 2>&1
-        PYV=$(which python3.6)
-    fi
-    if command -v pip3 >>/dev/null 2>&1; then
-        echo 'pip 存在 . . .'
-    else
-        echo "pip3 未安装在此系统上，正在进行安装"
-        apt-get install -y python3-pip >>/dev/null 2>&1
-    fi
-}
-
-debian_python_check() {
-    echo "正在检查 python 安装情况 . . ."
-    if command -v python3 >>/dev/null 2>&1; then
-        U_V1=$(python3 -V 2>&1 | awk '{print $2}' | awk -F '.' '{print $1}')
-        U_V2=$(python3 -V 2>&1 | awk '{print $2}' | awk -F '.' '{print $2}')
-        if [ $U_V1 -gt 3 ]; then
-            echo 'Python 3.6+ 存在 . . .'
-        elif [ $U_V2 -ge 6 ]; then
-            echo 'Python 3.6+ 存在 . . .'
-            PYV=$U_V1.$U_V2
-            PYV=$(which python$PYV)
-        else
-            if command -v python3.6 >>/dev/null 2>&1; then
-                echo 'Python 3.6+ 存在 . . .'
-                PYV=$(which python3.6)
-            else
-                echo "Python3.6 未安装在此系统上，正在进行安装"
-                apt-get update -y >>/dev/null 2>&1
-                apt-get install -y build-essential tk-dev libncurses5-dev libncursesw5-dev libreadline6-dev libdb5.3-dev libgdbm-dev libsqlite3-dev libssl-dev libbz2-dev libexpat1-dev liblzma-dev zlib1g-dev >>/dev/null 2>&1
-                wget https://www.python.org/ftp/python/3.6.5/Python-3.6.5.tgz >>/dev/null 2>&1
-                tar -xvf Python-3.6.5.tgz >>/dev/null 2>&1
-                chmod -R +x Python-3.6.5 >>/dev/null 2>&1
-                cd Python-3.6.5 >>/dev/null 2>&1
-                ./configure >>/dev/null 2>&1
-                make && make install >>/dev/null 2>&1
-                cd .. >>/dev/null 2>&1
-                rm -rf Python-3.6.5 Python-3.6.5.tar.gz >>/dev/null 2>&1
-                PYV=$(which python3.6)
-                update-alternatives --install /usr/bin/python3 python3 $PYV 1 >>/dev/null 2>&1
-            fi
-        fi
-    else
-        echo "Python3.6 未安装在此系统上，正在进行安装"
-        apt-get update -y >>/dev/null 2>&1
-        apt-get install -y build-essential tk-dev libncurses5-dev libncursesw5-dev libreadline6-dev libdb5.3-dev libgdbm-dev libsqlite3-dev libssl-dev libbz2-dev libexpat1-dev liblzma-dev zlib1g-dev >>/dev/null 2>&1
-        wget https://www.python.org/ftp/python/3.6.5/Python-3.6.5.tgz >>/dev/null 2>&1
-        tar -xvf Python-3.6.5.tgz >>/dev/null 2>&1
-        chmod -R +x Python-3.6.5 >>/dev/null 2>&1
-        cd Python-3.6.5 >>/dev/null 2>&1
-        ./configure >>/dev/null 2>&1
-        make && make install >>/dev/null 2>&1
-        cd .. >>/dev/null 2>&1
-        rm -rf Python-3.6.5 Python-3.6.5.tar.gz >>/dev/null 2>&1
-        PYV=$(which python3)
-        update-alternatives --install /usr/bin/python3 python3 $PYV 1 >>/dev/null 2>&1
-    fi
-    echo "正在检查 pip3 安装情况 . . ."
-    if command -v pip3 >>/dev/null 2>&1; then
-        echo 'pip 存在 . . .'
-    else
-        echo "pip3 未安装在此系统上，正在进行安装"
-        apt-get install -y python3-pip >>/dev/null 2>&1
-    fi
-}
-
-apt_screen_check() {
-    echo "正在检查 Screen 安装情况 . . ."
-    if command -v screen >>/dev/null 2>&1; then
-        echo "Screen 似乎存在, 安装过程继续 . . ."
-    else
-        echo "Screen 未安装在此系统上，正在进行安装"
-        apt-get install screen -y >>/dev/null 2>&1
-    fi
-}
-
-apt_require_install() {
-    echo "正在安装系统所需依赖，可能需要几分钟的时间 . . ."
-    apt-get install python3.6-dev python3-dev imagemagick software-properties-common tesseract-ocr tesseract-ocr-chi-sim libzbar-dev -y >>/dev/null 2>&1
-    add-apt-repository ppa:dawidd0811/neofetch -y
-    apt-get install neofetch -y >>/dev/null 2>&1
-}
-
-debian_require_install() {
-    echo "正在安装系统所需依赖，可能需要几分钟的时间 . . ."
-    apt-get install imagemagick software-properties-common tesseract-ocr tesseract-ocr-chi-sim libzbar-dev neofetch -y >>/dev/null 2>&1
-}
-
-download_repo() {
-    echo "下载 repository 中 . . ."
-    rm -rf /var/lib/pagermaid2 >>/dev/null 2>&1
-    git clone https://gitlab.com/Xtao-Labs/pagermaid-modify.git /var/lib/pagermaid2 >>/dev/null 2>&1
-    cd /var/lib/pagermaid2 >>/dev/null 2>&1
-    echo "Hello World!" >/var/lib/pagermaid2/public.lock
-}
-
-pypi_install() {
-    echo "下载安装 pypi 依赖中 . . ."
-    $PYV -m pip install --upgrade pip >>/dev/null 2>&1
-    $PYV -m pip install -r requirements.txt >>/dev/null 2>&1
-    sudo -H $PYV -m pip install --ignore-installed PyYAML >>/dev/null 2>&1
-}
-
-configure() {
-    config_file=config.yml
-    echo "生成配置文件中 . . ."
-    cp config.gen.yml config.yml
-    echo "api_id、api_hash 申请地址： https://my.telegram.org/"
-    printf "请输入应用程序 api_id："
-    read -r api_id <&1
-    sed -i "s/ID_HERE/$api_id/" $config_file
-    printf "请输入应用程序 api_hash："
-    read -r api_hash <&1
-    sed -i "s/HASH_HERE/$api_hash/" $config_file
-    printf "请输入应用程序语言（默认：zh-cn）："
-    read -r application_language <&1
-    if [ -z "$application_language" ]; then
-        echo "语言设置为 简体中文"
-    else
-        sed -i "s/zh-cn/$application_language/" $config_file
-    fi
-    printf "请输入应用程序地区（默认：China）："
-    read -r application_region <&1
-    if [ -z "$application_region" ]; then
-        echo "地区设置为 中国"
-    else
-        sed -i "s/China/$application_region/" $config_file
-    fi
-    printf "请输入 Google TTS 语言（默认：zh-CN）："
-    read -r application_tts <&1
-    if [ -z "$application_tts" ]; then
-        echo "tts发音语言设置为 简体中文"
-    else
-        sed -i "s/zh-CN/$application_tts/" $config_file
-    fi
-    printf "启用日志记录？ [Y/n]"
-    read -r logging_confirmation <&1
-    case $logging_confirmation in
-    [yY][eE][sS] | [yY])
-        printf "请输入您的日志记录群组/频道的 ChatID （如果要发送给 原 PagerMaid 作者 ，请按Enter）："
-        read -r log_chatid <&1
-        if [ -z "$log_chatid" ]; then
-            echo "LOG 将发送到 原 PagerMaid 作者."
-        else
-            sed -i "s/503691334/$log_chatid/" $config_file
-        fi
-        sed -i "s/log: False/log: True/" $config_file
-        ;;
-    [nN][oO] | [nN])
-        echo "安装过程继续 . . ."
-        ;;
-    *)
-        echo "输入错误 . . ."
-        exit 1
-        ;;
-    esac
-}
-
-read_checknum() {
-    while :; do
-    read -p "请输入您的登录验证码: " checknum
-    if [ "$checknum" == "" ]; then
-        continue
-    fi
-    read -p "请再次输入您的登录验证码：" checknum2
-    if [ "$checknum" != "$checknum2" ]; then
-        echo "两次验证码不一致！请重新输入您的登录验证码"
-        continue
-
-    else
-        screen -x -S userbot -p 0 -X stuff "$checknum"
-        screen -x -S userbot -p 0 -X stuff $'\n'
-        break
-    fi
-done
-    read -p "有没有二次登录验证码？ [Y/n]" choi
-    if [ "$choi" == "y" ] || [ "$choi" == "Y" ]; then
-        read -p "请输入您的二次登录验证码: " twotimepwd
-        screen -x -S userbot -p 0 -X stuff "$twotimepwd"
-        screen -x -S userbot -p 0 -X stuff $'\n'
-    fi
-    
-}
-
-login_screen() {
-    screen -S userbot -X quit >>/dev/null 2>&1
-    screen -dmS userbot
-    sleep 1
-    screen -x -S userbot -p 0 -X stuff "cd /var/lib/pagermaid2 && $PYV -m pagermaid2"
-    screen -x -S userbot -p 0 -X stuff $'\n'
-    sleep 3
-    if [ "$(ps -def | grep [p]agermaid | grep -v grep)" == "" ]; then
-        echo "PagerMaid 运行时发生错误，错误信息："
-        cd /var/lib/pagermaid2 && $PYV -m pagermaid2 >err.log
-        cat err.log
-        screen -S userbot -X quit >>/dev/null 2>&1
-        exit 1
-    fi
-    while :; do
-        echo "一键脚本出现任何问题请转手动搭建！ xtaolabs.com"
-        echo "一键脚本出现任何问题请转手动搭建！ xtaolabs.com"
-        echo "一键脚本出现任何问题请转手动搭建！ xtaolabs.com"
-        echo ""
-        read -p "请输入您的 Telegram 手机号码（带国际区号 如 +8618888888888）: " phonenum
-
-        if [ "$phonenum" == "" ]; then
-            continue
-        fi
-
-        screen -x -S userbot -p 0 -X stuff "$phonenum"
-        screen -x -S userbot -p 0 -X stuff $'\n'
-
-        sleep 2
-        
-        if [ "$(ps -def | grep [p]agermaid | grep -v grep)" == "" ]; then
-            echo "手机号输入错误！请确认您是否带了区号（中国号码为 +86 如 +8618888888888）"
-            screen -x -S userbot -p 0 -X stuff "cd /var/lib/pagermaid2 && $PYV -m pagermaid2"
-            screen -x -S userbot -p 0 -X stuff $'\n'
-            continue
-        fi
-
-        sleep 1
-        if [ "$(ps -def | grep [p]agermaid | grep -v grep)" == "" ]; then
-            echo "PagerMaid 运行时发生错误，可能是因为发送验证码失败，请检查您的 API_ID 和 API_HASH"
+    if [ $# == 0 ]; then
+        last_version=$(curl -Ls "https://api.github.com/repos/vaxilu/x-ui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        if [[ ! -n "$last_version" ]]; then
+            echo -e "${red}检测 x-ui 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 x-ui 版本安装${plain}"
             exit 1
         fi
-
-        read -p "请输入您的登录验证码: " checknum
-        if [ "$checknum" == "" ]; then
-            read_checknum
-            break
+        echo -e "检测到 x-ui 最新版本：${last_version}，开始安装"
+        wget -N --no-check-certificate -O /usr/local/x-ui-linux-${arch}.tar.gz https://github.com/vaxilu/x-ui/releases/download/${last_version}/x-ui-linux-${arch}.tar.gz
+        if [[ $? -ne 0 ]]; then
+            echo -e "${red}下载 x-ui 失败，请确保你的服务器能够下载 Github 的文件${plain}"
+            exit 1
         fi
-
-        read -p "请再次输入您的登录验证码：" checknum2
-        if [ "$checknum" != "$checknum2" ]; then
-            echo "两次验证码不一致！请重新输入您的登录验证码"
-            read_checknum
-            break
-        else
-            screen -x -S userbot -p 0 -X stuff "$checknum"
-            screen -x -S userbot -p 0 -X stuff $'\n'
+    else
+        last_version=$1
+        url="https://github.com/vaxilu/x-ui/releases/download/${last_version}/x-ui-linux-${arch}.tar.gz"
+        echo -e "开始安装 x-ui v$1"
+        wget -N --no-check-certificate -O /usr/local/x-ui-linux-${arch}.tar.gz ${url}
+        if [[ $? -ne 0 ]]; then
+            echo -e "${red}下载 x-ui v$1 失败，请确保此版本存在${plain}"
+            exit 1
         fi
-
-        read -p "有没有二次登录验证码？ [Y/n]" choi
-        if [ "$choi" == "y" ] || [ "$choi" == "Y" ]; then
-            read -p "请输入您的二次登录验证码: " twotimepwd
-            screen -x -S userbot -p 0 -X stuff "$twotimepwd"
-            screen -x -S userbot -p 0 -X stuff $'\n'
-            break
-        else
-            break
-        fi
-    done
-    sleep 5
-    screen -S userbot -X quit >>/dev/null 2>&1
-}
-
-systemctl_reload() {
-    echo "正在写入系统进程守护 . . ."
-    echo "[Unit]
-    Description=PagerMaid-Modify telegram utility daemon
-    After=network.target
-    [Install]
-    WantedBy=multi-user.target
-    [Service]
-    Type=simple
-    WorkingDirectory=/var/lib/pagermaid2
-    ExecStart=$PYV -m pagermaid2
-    Restart=always
-    " >/etc/systemd/system/pagermaid2.service
-    chmod 755 pagermaid2.service >>/dev/null 2>&1
-    systemctl daemon-reload >>/dev/null 2>&1
-    systemctl start pagermaid2 >>/dev/null 2>&1
-    systemctl enable pagermaid2 >>/dev/null 2>&1
-}
-
-start_installation() {
-    if [ "$release" = "centos" ]; then
-        echo "系统检测通过。"
-        welcome
-        yum_update
-        yum_git_check
-        yum_python_check
-        yum_screen_check
-        yum_require_install
-        download_repo
-        pypi_install
-        configure
-        login_screen
-        systemctl_reload
-        echo "PagerMaid 已经安装完毕 在telegram对话框中输入 -help 并发送查看帮助列表"
-    elif [ "$release" = "ubuntu" ]; then
-        echo "系统检测通过。"
-        welcome
-        apt_update
-        apt_git_check
-        apt_python_check
-        apt_screen_check
-        apt_require_install
-        download_repo
-        pypi_install
-        configure
-        login_screen
-        systemctl_reload
-        echo "PagerMaid 已经安装完毕 在telegram对话框中输入 -help 并发送查看帮助列表"
-    elif [ "$release" = "debian" ]; then
-        echo "系统检测通过。"
-        welcome
-        apt_update
-        apt_git_check
-        debian_python_check
-        apt_screen_check
-        debian_require_install
-        download_repo
-        pypi_install
-        configure
-        login_screen
-        systemctl_reload
-        echo "PagerMaid 已经安装完毕 在telegram对话框中输入 -help 并发送查看帮助列表"
-    else
-        echo "目前暂时不支持此系统。"
     fi
-    exit 1
-}
 
-cleanup() {
-    if [ ! -x "/var/lib/pagermaid2" ]; then
-        echo "目录不存在不需要卸载。"
-    else
-        echo "正在关闭 PagerMaid . . ."
-        systemctl disable pagermaid2 >>/dev/null 2>&1
-        systemctl stop pagermaid >>/dev/null 2>&1
-        echo "正在删除 PagerMaid 文件 . . ."
-        rm -rf /etc/systemd/system/pagermaid2.service >>/dev/null 2>&1
-        rm -rf /var/lib/pagermaid2 >>/dev/null 2>&1
-        echo "卸载完成 . . ."
+    if [[ -e /usr/local/x-ui/ ]]; then
+        rm /usr/local/x-ui/ -rf
     fi
+
+    tar zxvf x-ui-linux-${arch}.tar.gz
+    rm x-ui-linux-${arch}.tar.gz -f
+    cd x-ui
+    chmod +x x-ui bin/xray-linux-${arch}
+    cp -f x-ui.service /etc/systemd/system/
+    wget --no-check-certificate -O /usr/bin/x-ui https://raw.githubusercontent.com/vaxilu/x-ui/main/x-ui.sh
+    chmod +x /usr/local/x-ui/x-ui.sh
+    chmod +x /usr/bin/x-ui
+    config_after_install
+    #echo -e "如果是全新安装，默认网页端口为 ${green}54321${plain}，用户名和密码默认都是 ${green}admin${plain}"
+    #echo -e "请自行确保此端口没有被其他程序占用，${yellow}并且确保 54321 端口已放行${plain}"
+    #    echo -e "若想将 54321 修改为其它端口，输入 x-ui 命令进行修改，同样也要确保你修改的端口也是放行的"
+    #echo -e ""
+    #echo -e "如果是更新面板，则按你之前的方式访问面板"
+    #echo -e ""
+    systemctl daemon-reload
+    systemctl enable x-ui
+    systemctl start x-ui
+    echo -e "${green}x-ui v${last_version}${plain} 安装完成，面板已启动，"
+    echo -e ""
+    echo -e "x-ui 管理脚本使用方法: "
+    echo -e "----------------------------------------------"
+    echo -e "x-ui              - 显示管理菜单 (功能更多)"
+    echo -e "x-ui start        - 启动 x-ui 面板"
+    echo -e "x-ui stop         - 停止 x-ui 面板"
+    echo -e "x-ui restart      - 重启 x-ui 面板"
+    echo -e "x-ui status       - 查看 x-ui 状态"
+    echo -e "x-ui enable       - 设置 x-ui 开机自启"
+    echo -e "x-ui disable      - 取消 x-ui 开机自启"
+    echo -e "x-ui log          - 查看 x-ui 日志"
+    echo -e "x-ui v2-ui        - 迁移本机器的 v2-ui 账号数据至 x-ui"
+    echo -e "x-ui update       - 更新 x-ui 面板"
+    echo -e "x-ui install      - 安装 x-ui 面板"
+    echo -e "x-ui uninstall    - 卸载 x-ui 面板"
+    echo -e "----------------------------------------------"
 }
 
-reinstall() {
-    cleanup
-    start_installation
-}
-
-cleansession() {
-    if [ ! -x "/var/lib/pagermaid2" ]; then
-        echo "目录不存在请重新安装 PagerMaid。"
-        exit 1
-    fi
-    echo "正在关闭 PagerMaid . . ."
-    systemctl stop pagermaid2 >>/dev/null 2>&1
-    echo "正在删除账户授权文件 . . ."
-    rm -rf /var/lib/pagermaid2/pagermaid2.session >>/dev/null 2>&1
-    echo "请进行重新登陆. . ."
-    if [ "$release" = "centos" ]; then
-        yum_python_check
-        yum_screen_check
-    elif [ "$release" = "ubuntu" ]; then
-        apt_python_check
-        apt_screen_check
-    elif [ "$release" = "debian" ]; then
-        debian_python_check
-        apt_screen_check
-    else
-        echo "目前暂时不支持此系统。"
-    fi
-    login_screen
-    systemctl start pagermaid2 >>/dev/null 2>&1
-}
-
-stop_pager() {
-    echo ""
-    echo "正在关闭 PagerMaid . . ."
-    systemctl stop pagermaid2 >>/dev/null 2>&1
-    echo ""
-    sleep 3
-    shon_online
-}
-
-start_pager() {
-    echo ""
-    echo "正在启动 PagerMaid . . ."
-    systemctl start pagermaid2 >>/dev/null 2>&1
-    echo ""
-    sleep 3
-    shon_online
-}
-
-restart_pager() {
-    echo ""
-    echo "正在重新启动 PagerMaid . . ."
-    systemctl restart pagermaid2 >>/dev/null 2>&1
-    echo ""
-    sleep 3
-    shon_online
-}
-
-install_require() {
-    if [ "$release" = "centos" ]; then
-        echo "系统检测通过。"
-        yum_update
-        yum_git_check
-        yum_python_check
-        yum_screen_check
-        yum_require_install
-        pypi_install
-        systemctl_reload
-        shon_online
-    elif [ "$release" = "ubuntu" ]; then
-        echo "系统检测通过。"
-        apt_update
-        apt_git_check
-        apt_python_check
-        apt_screen_check
-        apt_require_install
-        pypi_install
-        systemctl_reload
-        shon_online
-    elif [ "$release" = "debian" ]; then
-        echo "系统检测通过。"
-        welcome
-        apt_update
-        apt_git_check
-        debian_python_check
-        apt_screen_check
-        debian_require_install
-        pypi_install
-        systemctl_reload
-        shon_online
-    else
-        echo "目前暂时不支持此系统。"
-    fi
-    exit 1
-}
-
-shon_online() {
-    echo "一键脚本出现任何问题请转手动搭建！ xtaolabs.com"
-    echo "一键脚本出现任何问题请转手动搭建！ xtaolabs.com"
-    echo "一键脚本出现任何问题请转手动搭建！ xtaolabs.com"
-    echo ""
-    echo ""
-    echo "请选择您需要进行的操作:"
-    echo "  1) 安装 PagerMaid"
-    echo "  2) 卸载 PagerMaid"
-    echo "  3) 重新安装 PagerMaid"
-    echo "  4) 重新登陆 PagerMaid"
-    echo "  5) 关闭 PagerMaid"
-    echo "  6) 启动 PagerMaid"
-    echo "  7) 重新启动 PagerMaid"
-    echo "  8) 重新安装 PagerMaid 依赖"
-    echo "  9) 退出脚本"
-    echo ""
-    echo "     Version：0.1.4"
-    echo ""
-    echo -n "请输入编号: "
-    read N
-    case $N in
-    1) start_installation ;;
-    2) cleanup ;;
-    3) reinstall ;;
-    4) cleansession ;;
-    5) stop_pager ;;
-    6) start_pager ;;
-    7) restart_pager ;;
-    8) install_require ;;
-    9) exit ;;
-    *) echo "Wrong input!" ;;
-    esac
-}
-
-check_sys
-shon_online
+echo -e "${green}开始安装${plain}"
+install_base
+install_x-ui $1
